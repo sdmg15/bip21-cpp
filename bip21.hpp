@@ -4,6 +4,7 @@
 #include <string>
 #include <sstream>
 #include <iostream>
+#include <optional>
 
 namespace sk::bip21 {
         
@@ -24,9 +25,10 @@ namespace sk::bip21 {
         }
     }
 
+    using Component = std::vector<std::pair<std::string, std::string>>;
     struct Bip21 {
         std::string address;
-        std::vector<std::pair<std::string, std::string>> options;
+        Component options;
 
         friend std::ostream& operator<<(std::ostream& os, const Bip21& b) {
             os << "Address ==> " << b.address << "\n";
@@ -38,8 +40,15 @@ namespace sk::bip21 {
     };
 
     using Error = std::string;
+    using Result = std::pair<Bip21, Error>;
 
-    static auto decode(const std::string& uri) -> std::pair<Bip21, Error> {
+    static auto decode(const std::string& uri, std::optional<std::string> customScheme) -> Result {
+
+        std::string schemeToUse = "bitcoin:";
+
+        if (customScheme) {
+            schemeToUse = customScheme.value();
+        }
 
         auto it = std::find_if(uri.begin(), uri.end(), [](char c){
             return c == ':';
@@ -48,21 +57,17 @@ namespace sk::bip21 {
         std::string schemeComponent{uri.begin(), it};
         tolower(schemeComponent);
 
-        if (schemeComponent != "bitcoin") {
-            return {{}, Error{"Unknown URL scheme"}};
-        }
-
         auto queryStrIt = std::find_if(uri.begin(), uri.end(), [](char c){
             return c == '?';
         });
 
-        std::string base58Addr{std::next(it), uri.end()};
+        std::string base58Addr{uri.begin() + schemeToUse.size(), uri.end()};
         if (queryStrIt == uri.end()) {
             return {Bip21{base58Addr, {}}, {}};
         }
 
         Bip21 res;
-        res.address = base58Addr;
+        res.address = std::move(base58Addr);
 
         std::string params{std::next(queryStrIt), uri.end()};
         auto v = split(params, '&');
@@ -71,5 +76,37 @@ namespace sk::bip21 {
             res.options.push_back({c[0], c[1]});
         }
         return {res, {}};
+    }
+
+    static auto decode(const std::string& uri) -> Result {
+        return decode(uri, std::nullopt);
+    }
+
+
+    static auto encode(const std::string& addr, std::optional<std::string> scheme,
+                       std::optional<Component> components) -> std::string {
+        
+        if (!scheme) {
+            std::string r{"bitcoin:" + addr};
+            if (components) {
+                ushort i{0}; 
+                r += "?";
+                for (const auto& v: components.value()) {
+                    i++ == 0? r += v.first + "=" + v.second : r += "&"+v.first + "=" + v.second;
+                }
+            }
+            return r; 
+        }
+
+        std::string r{scheme.value() + addr};
+        if (components) {
+            ushort i{0}; 
+            r += "?";
+            for (const auto& v: components.value()) {
+                i++ == 0? r += v.first + "=" + v.second : r += "&"+v.first + "=" + v.second;
+            }
+        }
+        return r;
+
     }
 } //namespace sk::bip21
